@@ -68,7 +68,13 @@ import org.eclipse.aether.metadata.DefaultMetadata;
 import org.eclipse.aether.resolution.VersionResult;
 import org.eclipse.aether.resolution.VersionRequest;
 import org.eclipse.aether.resolution.VersionResolutionException;
+import org.eclipse.aether.repository.ArtifactRepository;
+import org.eclipse.aether.repository.LocalArtifactRequest;
+import org.eclipse.aether.repository.LocalArtifactResult;
+import org.eclipse.aether.repository.LocalRepository;
+import org.eclipse.aether.repository.LocalRepositoryManager;
 import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.repository.WorkspaceRepository;
 import org.eclipse.aether.spi.connector.layout.RepositoryLayoutProvider;
 import org.eclipse.aether.spi.connector.layout.RepositoryLayout;
 import org.eclipse.aether.spi.connector.transport.GetTask;
@@ -179,6 +185,67 @@ public class Mvn2NixMojo extends AbstractMojo
 				gen.writeEnd();
 			}
 			gen.writeEnd();
+		}
+	}
+
+	private void emitArtifactRepo(
+		ArtifactDescriptorResult res,
+		RemoteRepository repo,
+		JsonGenerator gen) throws MojoExecutionException {
+		Artifact art = res.getArtifact();
+		gen.write("authenticated",
+			repo.getAuthentication() != null);
+		RepositoryLayout layout;
+		try {
+			layout = layoutProvider
+				.newRepositoryLayout(
+					repoSession,
+					repo);
+		} catch (NoRepositoryLayoutException e) {
+			throw new MojoExecutionException(
+				"Getting repository layout",
+				e);
+		}
+
+		String base = repo.getUrl();
+		/* TODO: Open the transporters all at once */
+		try (Transporter transport =
+			transporterProvider.newTransporter(
+				repoSession
+				, repo)) {
+			ArtifactDownloadInfo info =
+				getDownloadInfo(art,
+						layout,
+						base,
+						transport);
+			gen.write("url", info.url);
+			gen.write("sha1", info.hash);
+
+			gen.writeStartArray("relocations");
+			for (Artifact rel :
+					res.getRelocations()) {
+				Artifact relPom =
+					new DefaultArtifact(
+					rel.getGroupId(),
+					rel.getArtifactId(),
+					rel.getClassifier(),
+					"pom",
+					rel.getVersion());
+				gen.writeStartObject();
+				info = getDownloadInfo(art,
+					layout,
+					base,
+					transport);
+				gen.write("url", info.url);
+				gen.write("sha1", info.hash);
+				gen.writeEnd();
+			}
+			gen.writeEnd();
+		} catch (NoTransporterException e) {
+			throw new MojoExecutionException(
+				"No transporter for " +
+					art.toString(),
+				e);
 		}
 	}
 
@@ -381,63 +448,27 @@ public class Mvn2NixMojo extends AbstractMojo
 				gen.write("sha1", metadataInfo.hash);
 				gen.writeEnd();
 			}
-			if (res.getRepository() instanceof RemoteRepository) {
-				RemoteRepository repo = (RemoteRepository) res
-					.getRepository();
-				gen.write("authenticated",
-					repo.getAuthentication() != null);
-				RepositoryLayout layout;
-				try {
-					layout = layoutProvider
-						.newRepositoryLayout(
-							repoSession,
-							repo);
-				} catch (NoRepositoryLayoutException e) {
-					throw new MojoExecutionException(
-						"Getting repository layout",
-						e);
-				}
 
-				String base = repo.getUrl();
-				/* TODO: Open the transporters all at once */
-				try (Transporter transport =
-					transporterProvider.newTransporter(
-						repoSession
-						, repo)) {
-					ArtifactDownloadInfo info =
-						getDownloadInfo(art,
-								layout,
-								base,
-								transport);
-					gen.write("url", info.url);
-					gen.write("sha1", info.hash);
-
-					gen.writeStartArray("relocations");
-					for (Artifact rel :
-							res.getRelocations()) {
-						Artifact relPom =
-							new DefaultArtifact(
-							rel.getGroupId(),
-							rel.getArtifactId(),
-							rel.getClassifier(),
-							"pom",
-							rel.getVersion());
-						gen.writeStartObject();
-						info = getDownloadInfo(art,
-							layout,
-							base,
-							transport);
-						gen.write("url", info.url);
-						gen.write("sha1", info.hash);
-						gen.writeEnd();
-					}
-					gen.writeEnd();
-				} catch (NoTransporterException e) {
-					throw new MojoExecutionException(
-						"No transporter for " +
-							art.toString(),
-						e);
-				}
+			ArtifactRepository repo = res.getRepository();
+			if (repo instanceof RemoteRepository) {
+				emitArtifactRepo(res, (RemoteRepository) repo, gen);
+			} else if (repo instanceof LocalRepository) {
+				LocalRepositoryManager localManager =
+					repoSession.getLocalRepositoryManager();
+				LocalArtifactRequest localReq =
+					new LocalArtifactRequest(art, res.getRepositories(), null);
+				LocalArtifactResult localArtifact =
+					localManager.find(repoSession, localReq);
+				emitArtifactRepo(res, localArtifact.getRepository(), gen);
+			} else if (repo instanceof WorkspaceRepository) {
+				// Do nothing
+			} else {
+				throw new MojoExecutionException(
+					String.format(
+						"Could not resolve remote repository for %s in %s",
+						art.getArtifactId(),
+						res.getRepository().getId())
+				);
 			}
 			gen.writeEnd();
 		}
