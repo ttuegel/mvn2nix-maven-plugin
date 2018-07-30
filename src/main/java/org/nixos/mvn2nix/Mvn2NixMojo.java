@@ -414,6 +414,20 @@ public class Mvn2NixMojo extends AbstractMojo
 				}
 			}
 		}
+
+		VersionRequest verReq = new VersionRequest(art, repos, null);
+		VersionResult verRes;
+		try {
+			verRes = repoSystem.resolveVersion(repoSession, verReq);
+		} catch (VersionResolutionException e) {
+			throw new MojoExecutionException(
+				"getting version for " + art.toString(),
+				e);
+		}
+		String version = verRes.getVersion();
+		getLog().info(String.format("resolved version %s:%s", art.getArtifactId(), version));
+		art.setVersion(version);
+
 		ArtifactDescriptorRequest req = new ArtifactDescriptorRequest(
 			art,
 			repos,
@@ -433,7 +447,7 @@ public class Mvn2NixMojo extends AbstractMojo
 			art.getArtifactId(),
 			art.getClassifier(),
 			art.getExtension(),
-			unresolvedVersion);
+			version);
 		if (printed.add(artKey)) {
 			gen.writeStartObject();
 			emitArtifactBody(art,
@@ -468,7 +482,7 @@ public class Mvn2NixMojo extends AbstractMojo
 					String.format(
 						"Could not resolve remote repository for %s in %s",
 						art.getArtifactId(),
-						res.getRepository().getId())
+						repo.getId())
 				);
 			}
 			gen.writeEnd();
@@ -479,7 +493,7 @@ public class Mvn2NixMojo extends AbstractMojo
 				art.getArtifactId(),
 				null,
 				"pom",
-				unresolvedVersion);
+				version);
 			Dependency pomDep = new Dependency(pomArt,
 				"compile",
 				new Boolean(false),
@@ -564,6 +578,7 @@ public class Mvn2NixMojo extends AbstractMojo
 			}
 		}
 		for (Extension e : project.getBuildExtensions()) {
+			getLog().info(String.format("found extension %s", e.getArtifactId()));
 			Artifact art = new DefaultArtifact(e.getGroupId(),
 				e.getArtifactId(),
 				null,
