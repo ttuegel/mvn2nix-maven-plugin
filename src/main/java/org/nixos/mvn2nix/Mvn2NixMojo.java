@@ -52,6 +52,7 @@ import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.plugins.annotations.Component;
 import org.apache.maven.project.MavenProject;
 import org.apache.maven.repository.internal.ArtifactDescriptorReaderDelegate;
+import org.apache.maven.model.Extension;
 import org.apache.maven.model.Plugin;
 
 import org.eclipse.aether.RepositorySystem;
@@ -561,6 +562,15 @@ public class Mvn2NixMojo extends AbstractMojo
 					p.getDependencies()) {
 				work.add(mavenDependencyToDependency(subDep));
 			}
+		}
+		for (Extension e : project.getBuildExtensions()) {
+			Artifact art = new DefaultArtifact(e.getGroupId(),
+				e.getArtifactId(),
+				null,
+				"jar",
+				e.getVersion());
+			Dependency dep = new Dependency(art, "compile");
+			work.add(dep);
 		}
 		for (org.apache.maven.model.Dependency dep :
 				project.getDependencies()) {
