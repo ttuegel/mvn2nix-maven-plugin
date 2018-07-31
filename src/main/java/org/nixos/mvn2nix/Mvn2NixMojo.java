@@ -480,9 +480,8 @@ public class Mvn2NixMojo extends AbstractMojo
 			} else {
 				throw new MojoExecutionException(
 					String.format(
-						"Could not resolve remote repository for %s in %s",
-						art.getArtifactId(),
-						repo.getId())
+						"Could not resolve remote repository for %s",
+						art.getArtifactId())
 				);
 			}
 			gen.writeEnd();
