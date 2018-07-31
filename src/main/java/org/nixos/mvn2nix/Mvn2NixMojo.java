@@ -67,8 +67,11 @@ import org.eclipse.aether.artifact.DefaultArtifact;
 import org.eclipse.aether.metadata.Metadata;
 import org.eclipse.aether.metadata.DefaultMetadata;
 import org.eclipse.aether.resolution.VersionResult;
+import org.eclipse.aether.resolution.VersionRangeResult;
 import org.eclipse.aether.resolution.VersionRequest;
+import org.eclipse.aether.resolution.VersionRangeRequest;
 import org.eclipse.aether.resolution.VersionResolutionException;
+import org.eclipse.aether.resolution.VersionRangeResolutionException;
 import org.eclipse.aether.repository.ArtifactRepository;
 import org.eclipse.aether.repository.LocalArtifactRequest;
 import org.eclipse.aether.repository.LocalArtifactResult;
@@ -415,16 +418,16 @@ public class Mvn2NixMojo extends AbstractMojo
 			}
 		}
 
-		VersionRequest verReq = new VersionRequest(art, repos, null);
-		VersionResult verRes;
+		VersionRangeRequest verReq = new VersionRangeRequest(art, repos, null);
+		VersionRangeResult verRes;
 		try {
-			verRes = repoSystem.resolveVersion(repoSession, verReq);
-		} catch (VersionResolutionException e) {
+			verRes = repoSystem.resolveVersionRange(repoSession, verReq);
+		} catch (VersionRangeResolutionException e) {
 			throw new MojoExecutionException(
 				"getting version for " + art.toString(),
 				e);
 		}
-		String version = verRes.getVersion();
+		String version = verRes.getHighestVersion().toString();
 		getLog().info(String.format("resolved version %s:%s", art.getArtifactId(), version));
 		art.setVersion(version);
 
