@@ -429,7 +429,7 @@ public class Mvn2NixMojo extends AbstractMojo
 		}
 		String version = verRes.getHighestVersion().toString();
 		getLog().info(String.format("resolved version %s:%s", art.getArtifactId(), version));
-		art.setVersion(version);
+		art = art.setVersion(version);
 
 		ArtifactDescriptorRequest req = new ArtifactDescriptorRequest(
 			art,
