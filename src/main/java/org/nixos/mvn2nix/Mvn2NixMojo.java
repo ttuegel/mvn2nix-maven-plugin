@@ -154,6 +154,9 @@ public class Mvn2NixMojo extends AbstractMojo
 	}
 
 	private void emitArtifactBody(Artifact art, Collection<Dependency> deps,
+		ArtifactDownloadInfo metadataInfo,
+		String unresolvedVersion,
+		String repositoryId,
 		JsonGenerator gen) {
 		gen.write("artifactId", art.getArtifactId());
 		gen.write("groupId", art.getGroupId());
@@ -166,7 +169,7 @@ public class Mvn2NixMojo extends AbstractMojo
 			for (Dependency dep : deps) {
 				gen.writeStartObject();
 
-				emitArtifactBody(dep.getArtifact(), null, gen);
+				emitArtifactBody(dep.getArtifact(), null, null, unresolvedVersion, repositoryId, gen);
 
 				gen.write("scope", dep.getScope());
 				gen.write("optional", dep.isOptional());
@@ -188,6 +191,17 @@ public class Mvn2NixMojo extends AbstractMojo
 
 				gen.writeEnd();
 			}
+			gen.writeEnd();
+		}
+
+		if (metadataInfo != null) {
+			gen.write("unresolved-version",
+					unresolvedVersion);
+			gen.write("repository-id",
+					repositoryId);
+			gen.writeStartObject("metadata");
+			gen.write("url", metadataInfo.url);
+			gen.write("sha1", metadataInfo.hash);
 			gen.writeEnd();
 		}
 	}
@@ -453,22 +467,15 @@ public class Mvn2NixMojo extends AbstractMojo
 			version);
 		if (printed.add(artKey)) {
 			gen.writeStartObject();
-			emitArtifactBody(art,
-				res.getDependencies(),
-				gen);
-			if (metadataInfo != null) {
-				gen.write("unresolved-version",
-						unresolvedVersion);
-				gen.write("repository-id",
-						res.getRepository().getId());
-				gen.writeStartObject("metadata");
-				gen.write("url", metadataInfo.url);
-				gen.write("sha1", metadataInfo.hash);
-				gen.writeEnd();
-			}
-
 			ArtifactRepository repo = res.getRepository();
 			if (repo instanceof RemoteRepository) {
+				emitArtifactBody(art,
+					res.getDependencies(),
+					metadataInfo,
+					unresolvedVersion,
+					res.getRepository().getId(),
+					gen);
+
 				emitArtifactRepo(res, (RemoteRepository) repo, gen);
 			} else if (repo instanceof LocalRepository) {
 				LocalRepositoryManager localManager =
@@ -477,6 +484,14 @@ public class Mvn2NixMojo extends AbstractMojo
 					new LocalArtifactRequest(art, res.getRepositories(), null);
 				LocalArtifactResult localArtifact =
 					localManager.find(repoSession, localReq);
+
+				emitArtifactBody(art,
+					res.getDependencies(),
+					metadataInfo,
+					unresolvedVersion,
+					res.getRepository().getId(),
+					gen);
+
 				emitArtifactRepo(res, localArtifact.getRepository(), gen);
 			} else if (repo instanceof WorkspaceRepository) {
 				// Do nothing
@@ -605,6 +620,9 @@ public class Mvn2NixMojo extends AbstractMojo
 				emitArtifactBody(
 				                 mavenArtifactToArtifact(project.getArtifact()),
 				                 work,
+												 null,
+												 "",
+												 "",
 				                 gen);
 				gen.writeEnd();
 
