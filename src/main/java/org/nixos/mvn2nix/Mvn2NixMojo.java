@@ -471,9 +471,9 @@ public class Mvn2NixMojo extends AbstractMojo
 			art.getExtension(),
 			version);
 		if (printed.add(artKey)) {
-			gen.writeStartObject();
 			ArtifactRepository repo = res.getRepository();
 			if (repo instanceof RemoteRepository) {
+				gen.writeStartObject();
 				emitArtifactBody(art,
 					res.getDependencies(),
 					metadataInfo,
@@ -482,7 +482,9 @@ public class Mvn2NixMojo extends AbstractMojo
 					gen);
 
 				emitArtifactRepo(res, (RemoteRepository) repo, gen);
+				gen.writeEnd();
 			} else if (repo instanceof LocalRepository) {
+				gen.writeStartObject();
 				LocalRepositoryManager localManager =
 					repoSession.getLocalRepositoryManager();
 				LocalArtifactRequest localReq =
@@ -498,6 +500,7 @@ public class Mvn2NixMojo extends AbstractMojo
 					gen);
 
 				emitArtifactRepo(res, localArtifact.getRepository(), gen);
+				gen.writeEnd();
 			} else if (repo instanceof WorkspaceRepository) {
 				// Do nothing
 			} else {
@@ -507,7 +510,6 @@ public class Mvn2NixMojo extends AbstractMojo
 						art.getArtifactId())
 				);
 			}
-			gen.writeEnd();
 		}
 
 		if (!art.getExtension().equals("pom")) {
