@@ -156,11 +156,17 @@ public class Mvn2NixMojo extends AbstractMojo
 	private void emitArtifactBody(Artifact art, Collection<Dependency> deps,
 		ArtifactDownloadInfo metadataInfo,
 		String unresolvedVersion,
-		String repositoryId,
-		JsonGenerator gen) {
+		RemoteRepository repo,
+		JsonGenerator gen) throws MojoExecutionException {
+
 		gen.write("artifactId", art.getArtifactId());
 		gen.write("groupId", art.getGroupId());
-		gen.write("version", art.getVersion());
+
+		List<RemoteRepository> repos = new ArrayList<>(1);
+		repos.add(repo);
+		String version = resolveHighestVersion(art, repos);
+		gen.write("version", version);
+
 		gen.write("classifier", art.getClassifier());
 		gen.write("extension", art.getExtension());
 
@@ -169,7 +175,7 @@ public class Mvn2NixMojo extends AbstractMojo
 			for (Dependency dep : deps) {
 				gen.writeStartObject();
 
-				emitArtifactBody(dep.getArtifact(), null, null, unresolvedVersion, repositoryId, gen);
+				emitArtifactBody(dep.getArtifact(), null, null, unresolvedVersion, repo, gen);
 
 				gen.write("scope", dep.getScope());
 				gen.write("optional", dep.isOptional());
@@ -198,7 +204,7 @@ public class Mvn2NixMojo extends AbstractMojo
 			gen.write("unresolved-version",
 					unresolvedVersion);
 			gen.write("repository-id",
-					repositoryId);
+					repo.getId());
 			gen.writeStartObject("metadata");
 			gen.write("url", metadataInfo.url);
 			gen.write("sha1", metadataInfo.hash);
@@ -207,8 +213,8 @@ public class Mvn2NixMojo extends AbstractMojo
 	}
 
 	private void emitProjectBody(Artifact art, Collection<Dependency> deps,
-		JsonGenerator gen) {
-		emitArtifactBody(art, deps, null, "", "", gen);
+		JsonGenerator gen) throws MojoExecutionException {
+		emitArtifactBody(art, deps, null, "", null, gen);
 	}
 
 	private void emitArtifactRepo(
@@ -437,16 +443,7 @@ public class Mvn2NixMojo extends AbstractMojo
 			}
 		}
 
-		VersionRangeRequest verReq = new VersionRangeRequest(art, repos, null);
-		VersionRangeResult verRes;
-		try {
-			verRes = repoSystem.resolveVersionRange(repoSession, verReq);
-		} catch (VersionRangeResolutionException e) {
-			throw new MojoExecutionException(
-				"getting version for " + art.toString(),
-				e);
-		}
-		String version = verRes.getHighestVersion().toString();
+		String version = resolveHighestVersion(art, repos);
 		getLog().info(String.format("resolved version %s:%s", art.getArtifactId(), version));
 		art = art.setVersion(version);
 
@@ -478,7 +475,7 @@ public class Mvn2NixMojo extends AbstractMojo
 					res.getDependencies(),
 					metadataInfo,
 					unresolvedVersion,
-					res.getRepository().getId(),
+					(RemoteRepository) repo,
 					gen);
 
 				emitArtifactRepo(res, (RemoteRepository) repo, gen);
@@ -496,7 +493,7 @@ public class Mvn2NixMojo extends AbstractMojo
 					res.getDependencies(),
 					metadataInfo,
 					unresolvedVersion,
-					res.getRepository().getId(),
+					localArtifact.getRepository(),
 					gen);
 
 				emitArtifactRepo(res, localArtifact.getRepository(), gen);
@@ -602,7 +599,6 @@ public class Mvn2NixMojo extends AbstractMojo
 			}
 		}
 		for (Extension e : project.getBuildExtensions()) {
-			getLog().info(String.format("found extension %s", e.getArtifactId()));
 			Artifact art = new DefaultArtifact(e.getGroupId(),
 				e.getArtifactId(),
 				null,
@@ -657,5 +653,20 @@ public class Mvn2NixMojo extends AbstractMojo
 				                                 e);
 			}
 		}
+	}
+
+	private String resolveHighestVersion(Artifact art, List<RemoteRepository> repos) throws MojoExecutionException {
+		VersionRangeRequest verReq = new VersionRangeRequest(art, repos, null);
+		VersionRangeResult verRes;
+
+		try {
+			verRes = repoSystem.resolveVersionRange(repoSession, verReq);
+		} catch (VersionRangeResolutionException e) {
+			throw new MojoExecutionException(
+				"getting version for " + art.toString(),
+				e);
+		}
+
+		return verRes.getHighestVersion().toString();
 	}
 }
