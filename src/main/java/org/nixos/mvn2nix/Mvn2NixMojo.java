@@ -206,6 +206,11 @@ public class Mvn2NixMojo extends AbstractMojo
 		}
 	}
 
+	private void emitProjectBody(Artifact art, Collection<Dependency> deps,
+		JsonGenerator gen) {
+		emitArtifactBody(art, deps, null, "", "", gen);
+	}
+
 	private void emitArtifactRepo(
 		ArtifactDescriptorResult res,
 		RemoteRepository repo,
@@ -617,12 +622,9 @@ public class Mvn2NixMojo extends AbstractMojo
 				gen.writeStartObject();
 
 				gen.writeStartObject("project");
-				emitArtifactBody(
+				emitProjectBody(
 				                 mavenArtifactToArtifact(project.getArtifact()),
 				                 work,
-												 null,
-												 "",
-												 "",
 				                 gen);
 				gen.writeEnd();
 
