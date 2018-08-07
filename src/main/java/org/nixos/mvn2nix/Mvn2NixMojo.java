@@ -523,9 +523,6 @@ public class Mvn2NixMojo extends AbstractMojo
 		}
 
 		for (Dependency subDep : res.getDependencies()) {
-			if (subDep.isOptional()) {
-				continue;
-			}
 			String scope = subDep.getScope();
 			if (scope != null && (scope.equals("provided")
 				|| scope.equals("test")
