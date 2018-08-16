@@ -461,6 +461,7 @@ public class Mvn2NixMojo extends AbstractMojo
 			}
 			String scope = subDep.getScope();
 			if (scope != null && (scope.equals("provided")
+				|| scope.equals("test")
 				|| scope.equals("system"))) {
 				continue;
 			}
