@@ -66,12 +66,15 @@ import org.eclipse.aether.repository.WorkspaceRepository;
        requiresDependencyResolution = ResolutionScope.TEST,
        requiresOnline = true,
        requiresProject = true
-       )
+		 )
 @Execute ( phase = LifecyclePhase.INSTALL )
 public class Mvn2NixMojo extends AbstractMojo
 {
     @Parameter(defaultValue="${session}", required=true)
     private MavenSession session;
+
+		@Parameter(defaultValue="${project}", required=true)
+		private MavenProject project;
 
     @Parameter(defaultValue="manifest.json", readonly=true)
     private File outputFile;
@@ -87,61 +90,69 @@ public class Mvn2NixMojo extends AbstractMojo
         return "";
     }
 
+    static private Set<Artifact> artifacts = new HashSet<Artifact>();
+
+		@Override
     public void execute()
         throws MojoExecutionException
     {
-        Set<Artifact> artifacts = new HashSet<Artifact>();
+
+				// Collect all artifacts from this project.
+				for (Artifact artifact: project.getArtifacts()) {
+						// If the artifact is remote, or cached from a remote, then
+						// resolve its download URL.
+						// See also:
+						//   org.eclipse.aether.RepositorySystem.resolveArtifact
+						//   org.apache.maven.project.MavenProject.getRemoteProjectRepositories
+						artifacts.add(artifact);
+				}
+				// Collect all plugin artifacts from this project.
+				for (Artifact artifact: project.getPluginArtifacts()) {
+						// If the artifact is remote, or cached from a remote, then
+						// resolve its download URL.
+						// See also:
+						//   org.eclipse.aether.RepositorySystem.resolveArtifact
+						//   org.apache.maven.project.MavenProject.getRemotePluginRepositories
+						artifacts.add(artifact);
+				}
 
         List<MavenProject> projects =
             session
             .getProjectDependencyGraph()
             .getSortedProjects();
 
-        for (MavenProject project: projects) {
-            // Collect all artifacts from this project.
-            for (Artifact artifact: project.getArtifacts) {
-                // If the artifact is remote, or cached from a remote, then
-                // resolve its download URL.
-                // See also:
-                //   org.eclipse.aether.RepositorySystem.resolveArtifact
-                //   org.apache.maven.project.MavenProject.getRemoteProjectRepositories
-            }
-            // Collect all plugin artifacts from this project.
-            for (Artifact artifact: project.getPluginArtifacts) {
-                // If the artifact is remote, or cached from a remote, then
-                // resolve its download URL.
-                // See also:
-                //   org.eclipse.aether.RepositorySystem.resolveArtifact
-                //   org.apache.maven.project.MavenProject.getRemotePluginRepositories
-            }
-        }
-
-        try {
-            FileOutputStream output = new FileOutputStream(outputFile);
-            JsonGenerator generator = Json.createGenerator(output);
-            generator.writeStartArray();
-            for (Artifact artifact: artifacts) {
-                getLog()
-                    .info("artifact "
-                          + artifact.getGroupId()
-                          + ":"
-                          + artifact.getArtifactId());
-                String url = getArtifactDownloadUrl(artifact);
-                generator
-                    .writeStartObject()
-                    .write("groupId", artifact.getGroupId())
-                    .write("artifactId", artifact.getArtifactId())
-                    .write("version", artifact.getVersion())
-                    .write("url", url)
-                    .writeEnd();
-            }
-            generator.writeEnd();
-            generator.close();
-            output.close();
-        } catch (FileNotFoundException e) {
-            throw new MojoExecutionException("Writing " + outputFile, e);
-        } catch (IOException e) {
-            throw new MojoExecutionException("Writing " + outputFile, e);
-        }
+				if (project == projects.get(projects.size() - 1)) {
+						// This is the last project, so we should write the manifest.
+						try {
+								FileOutputStream output = new FileOutputStream(outputFile);
+								JsonGenerator generator = Json.createGenerator(output);
+								generator.writeStartArray();
+								for (Artifact artifact: artifacts) {
+										getLog()
+												.info("artifact "
+															+ artifact.getGroupId()
+															+ ":"
+															+ artifact.getArtifactId()
+															+ ":"
+															+ artifact.getVersion()
+														);
+										String url = getArtifactDownloadUrl(artifact);
+										generator
+												.writeStartObject()
+												.write("groupId", artifact.getGroupId())
+												.write("artifactId", artifact.getArtifactId())
+												.write("version", artifact.getVersion())
+												.write("url", url)
+												.writeEnd();
+								}
+								generator.writeEnd();
+								generator.close();
+								output.close();
+						} catch (FileNotFoundException e) {
+								throw new MojoExecutionException("Writing " + outputFile, e);
+						} catch (IOException e) {
+								throw new MojoExecutionException("Writing " + outputFile, e);
+						}
+				}
     }
 }
