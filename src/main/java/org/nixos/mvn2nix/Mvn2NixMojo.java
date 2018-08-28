@@ -23,6 +23,7 @@
 
 package org.nixos.mvn2nix;
 
+import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -40,6 +41,8 @@ import org.apache.maven.execution.ProjectDependencyGraph;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugins.annotations.Component;
+import org.apache.maven.plugins.annotations.Execute;
+import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.plugins.annotations.ResolutionScope;
@@ -58,17 +61,20 @@ import org.eclipse.aether.repository.WorkspaceRepository;
  *
  * @author Thomas Tuegel
  */
-@Mojo(name = "mvn2nix", requiresDependencyResolution = ResolutionScope.TEST)
+@Mojo( name = "mvn2nix",
+       executionStrategy = "once-per-session",
+       requiresDependencyResolution = ResolutionScope.TEST,
+       requiresOnline = true,
+       requiresProject = true
+       )
+@Execute ( phase = LifecyclePhase.INSTALL )
 public class Mvn2NixMojo extends AbstractMojo
 {
-    @Parameter(defaultValue = "${project}", readonly = true, required = true)
-    private MavenProject project;
-
-    @Parameter(defaultValue = "${session}", readonly = true, required = true)
+    @Parameter(defaultValue="${session}", required=true)
     private MavenSession session;
 
-    @Parameter(property = "outputFile", defaultValue = "project-artifacts.json")
-    private String outputFile;
+    @Parameter(defaultValue="manifest.json", readonly=true)
+    private File outputFile;
 
     @Component
     private RepositorySystem repoSystem;
@@ -81,22 +87,34 @@ public class Mvn2NixMojo extends AbstractMojo
         return "";
     }
 
-    @Override
-    public void execute() throws MojoExecutionException
+    public void execute()
+        throws MojoExecutionException
     {
+        Set<Artifact> artifacts = new HashSet<Artifact>();
+
         List<MavenProject> projects =
             session
             .getProjectDependencyGraph()
             .getSortedProjects();
 
-        // Collect all artifacts from this project.
-        // This only contains resolved artifacts, which right now means
-        // static dependencies. If we invoked all the lifecycle phases
-        // for the project first, it would contain all dependencies.
-        // It also does not include plugins, but those are available from
-        // project.getPluginArtifacts().
-        Set<Artifact> artifacts = new HashSet<Artifact>();
-        artifacts.addAll(project.getArtifacts());
+        for (MavenProject project: projects) {
+            // Collect all artifacts from this project.
+            for (Artifact artifact: project.getArtifacts) {
+                // If the artifact is remote, or cached from a remote, then
+                // resolve its download URL.
+                // See also:
+                //   org.eclipse.aether.RepositorySystem.resolveArtifact
+                //   org.apache.maven.project.MavenProject.getRemoteProjectRepositories
+            }
+            // Collect all plugin artifacts from this project.
+            for (Artifact artifact: project.getPluginArtifacts) {
+                // If the artifact is remote, or cached from a remote, then
+                // resolve its download URL.
+                // See also:
+                //   org.eclipse.aether.RepositorySystem.resolveArtifact
+                //   org.apache.maven.project.MavenProject.getRemotePluginRepositories
+            }
+        }
 
         try {
             FileOutputStream output = new FileOutputStream(outputFile);
