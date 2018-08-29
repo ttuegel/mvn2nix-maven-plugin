@@ -80,7 +80,7 @@ public class Mvn2NixMojo extends AbstractMojo
     private List<MavenProject> projects;
 
     @Parameter(defaultValue="manifest.json", readonly=true)
-    private File outputFile;
+    private String outputFile;
 
     @Component
     private RepositorySystem repoSystem;
