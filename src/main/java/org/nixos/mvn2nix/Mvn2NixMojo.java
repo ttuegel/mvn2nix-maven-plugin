@@ -76,6 +76,9 @@ public class Mvn2NixMojo extends AbstractMojo
     @Parameter(defaultValue="${project}", required=true)
     private MavenProject project;
 
+    @Parameter(defaultValue="${reactorProjects}", readonly=true)
+    private List<MavenProject> projects;
+
     @Parameter(defaultValue="manifest.json", readonly=true)
     private File outputFile;
 
@@ -115,11 +118,6 @@ public class Mvn2NixMojo extends AbstractMojo
             //   org.apache.maven.project.MavenProject.getRemotePluginRepositories
             artifacts.add(artifact);
         }
-
-        List<MavenProject> projects =
-            session
-            .getProjectDependencyGraph()
-            .getSortedProjects();
 
         if (project == projects.get(projects.size() - 1)) {
             // This is the last project, so we should write the manifest.
