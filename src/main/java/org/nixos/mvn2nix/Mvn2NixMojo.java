@@ -27,6 +27,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.HashSet;
@@ -49,6 +50,7 @@ import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.plugins.annotations.ResolutionScope;
 import org.apache.maven.project.MavenProject;
 
+import org.eclipse.aether.RepositorySystemSession;
 import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.artifact.DefaultArtifact;
 import org.eclipse.aether.repository.ArtifactRepository;
@@ -59,7 +61,11 @@ import org.eclipse.aether.resolution.ArtifactDescriptorRequest;
 import org.eclipse.aether.resolution.ArtifactDescriptorResult;
 import org.eclipse.aether.spi.connector.layout.RepositoryLayout;
 import org.eclipse.aether.spi.connector.layout.RepositoryLayoutProvider;
+import org.eclipse.aether.spi.connector.transport.GetTask;
+import org.eclipse.aether.spi.connector.transport.Transporter;
+import org.eclipse.aether.spi.connector.transport.TransporterProvider;
 import org.eclipse.aether.transfer.NoRepositoryLayoutException;
+import org.eclipse.aether.transfer.NoTransporterException;
 
 
 /**
@@ -97,11 +103,17 @@ public class Mvn2NixMojo extends AbstractMojo
     @Component
     private RepositoryLayoutProvider layoutProvider;
 
+    @Component
+    private TransporterProvider transporterProvider;
+
     static private Set<Artifact> artifacts = new HashSet<Artifact>();
 
-    private String getArtifactDownloadUrl(Artifact artifact)
+    private ArtifactDownloadInfo getArtifactDownloadInfo(Artifact artifact)
         throws MojoExecutionException
     {
+        ArtifactDownloadInfo info = new ArtifactDownloadInfo();
+        RepositorySystemSession repoSession = session.getRepositorySession();
+
         String coords = String.format("%s:%s:%s", artifact.getGroupId(), artifact.getArtifactId(), artifact.getVersion());
 
         // Convert between the new API and aether's
@@ -114,13 +126,11 @@ public class Mvn2NixMojo extends AbstractMojo
         ArtifactDescriptorResult result;
 
         try {
-            result = repoSystem.readArtifactDescriptor(session.getRepositorySession(), req);
+            result = repoSystem.readArtifactDescriptor(repoSession, req);
         } catch (ArtifactDescriptorException e) {
             throw new MojoExecutionException("Getting descriptor for " + artifact.toString(), e);
         }
 
-        String baseURL = "";
-        ArtifactRepository ar = result.getRepository();
         URI fileLoc;
 
         try {
@@ -129,24 +139,55 @@ public class Mvn2NixMojo extends AbstractMojo
             throw new MojoExecutionException("Building empty URI", e);
         }
 
+        ArtifactRepository ar = result.getRepository();
+
         if (ar instanceof RemoteRepository) {
             RemoteRepository repo = (RemoteRepository) ar;
-            baseURL = repo.getUrl();
+            String baseURL = repo.getUrl();
 
             RepositoryLayout layout;
-
             try {
-                layout = layoutProvider.newRepositoryLayout(session.getRepositorySession(), repo);
+                layout = layoutProvider.newRepositoryLayout(repoSession, repo);
             } catch (NoRepositoryLayoutException e) {
                 throw new MojoExecutionException("Getting repository layout", e);
             }
 
             fileLoc = layout.getLocation(defaultArtifact, false);
-        } else {
-            getLog().warn("repo: " + ar.getClass().getName());
+
+            info.url = String.format("%s/%s", baseURL, fileLoc);
+
+            List<RepositoryLayout.Checksum> checksums = layout.getChecksums(defaultArtifact, false, fileLoc);
+            GetTask task = null;
+
+            for (RepositoryLayout.Checksum ck : checksums) {
+                if (ck.getAlgorithm().equals("SHA-1")) {
+                    task = new GetTask(ck.getLocation());
+                    break;
+                }
+            }
+
+            if (task == null) {
+                throw new MojoExecutionException("No SHA-1 for " + artifact.toString(), e);
+            }
+
+            try {
+                Transporter transporter = transporterProvider.newTransporter(repoSession, repo);
+                transporter.get(task);
+            } catch (NoTransporterException e) {
+                throw new MojoExecutionException("No transporter for " + artifact.toString(), e);
+            } catch (Exception e) {
+                throw new MojoExecutionException("Downloading SHA-1 for " + artifact.toString(), e);
+            }
+
+            try {
+                info.hash = new String(task.getDataBytes(), 0, 40, "UTF-8");
+            } catch (UnsupportedEncodingException e) {
+                throw new MojoExecutionException("Your JVM doesn't support UTF-8, fix that", e);
+            }
         }
 
-        return String.format("%s/%s", baseURL, fileLoc);
+
+        return info;
     }
 
     @Override
@@ -155,20 +196,10 @@ public class Mvn2NixMojo extends AbstractMojo
     {
         // Collect all artifacts from this project.
         for (Artifact artifact: project.getArtifacts()) {
-            // If the artifact is remote, or cached from a remote, then
-            // resolve its download URL.
-            // See also:
-            //   org.eclipse.aether.RepositorySystem.resolveArtifact
-            //   org.apache.maven.project.MavenProject.getRemoteProjectRepositories
             artifacts.add(artifact);
         }
         // Collect all plugin artifacts from this project.
         for (Artifact artifact: project.getPluginArtifacts()) {
-            // If the artifact is remote, or cached from a remote, then
-            // resolve its download URL.
-            // See also:
-            //   org.eclipse.aether.RepositorySystem.resolveArtifact
-            //   org.apache.maven.project.MavenProject.getRemotePluginRepositories
             artifacts.add(artifact);
         }
 
@@ -187,13 +218,15 @@ public class Mvn2NixMojo extends AbstractMojo
                               + ":"
                               + artifact.getVersion()
                             );
-                    String url = getArtifactDownloadUrl(artifact);
+                    ArtifactDownloadInfo info = getArtifactDownloadInfo(artifact);
+
                     generator
                         .writeStartObject()
                         .write("groupId", artifact.getGroupId())
                         .write("artifactId", artifact.getArtifactId())
                         .write("version", artifact.getVersion())
-                        .write("url", url)
+                        .write("url", info.url)
+                        .write("sha1", info.hash)
                         .writeEnd();
                 }
                 generator.writeEnd();
@@ -204,6 +237,17 @@ public class Mvn2NixMojo extends AbstractMojo
             } catch (IOException e) {
                 throw new MojoExecutionException("Writing " + outputFile, e);
             }
+        }
+    }
+
+    private class ArtifactDownloadInfo
+    {
+        public String url;
+        public String hash;
+
+        public ArtifactDownloadInfo() {
+            url = "";
+            hash = "";
         }
     }
 }
