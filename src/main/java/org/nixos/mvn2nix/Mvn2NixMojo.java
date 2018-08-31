@@ -27,6 +27,8 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -35,9 +37,8 @@ import javax.json.Json;
 import javax.json.stream.JsonGenerator;
 
 import org.apache.maven.artifact.Artifact;
-import org.apache.maven.artifact.repository.ArtifactRepository;
 import org.apache.maven.execution.MavenSession;
-import org.apache.maven.execution.ProjectDependencyGraph;
+import org.apache.maven.model.Plugin;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugins.annotations.Component;
@@ -47,13 +48,18 @@ import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.plugins.annotations.ResolutionScope;
 import org.apache.maven.project.MavenProject;
-import org.apache.maven.model.Plugin;
 
 import org.eclipse.aether.RepositorySystem;
-import org.eclipse.aether.RepositorySystemSession;
-import org.eclipse.aether.repository.LocalArtifactRequest;
-import org.eclipse.aether.repository.LocalRepository;
+import org.eclipse.aether.artifact.DefaultArtifact;
+import org.eclipse.aether.repository.ArtifactRepository;
+import org.eclipse.aether.repository.RemoteRepository;
 import org.eclipse.aether.repository.WorkspaceRepository;
+import org.eclipse.aether.resolution.ArtifactDescriptorException;
+import org.eclipse.aether.resolution.ArtifactDescriptorRequest;
+import org.eclipse.aether.resolution.ArtifactDescriptorResult;
+import org.eclipse.aether.spi.connector.layout.RepositoryLayout;
+import org.eclipse.aether.spi.connector.layout.RepositoryLayoutProvider;
+import org.eclipse.aether.transfer.NoRepositoryLayoutException;
 
 
 /**
@@ -85,21 +91,68 @@ public class Mvn2NixMojo extends AbstractMojo
     @Component
     private RepositorySystem repoSystem;
 
-    private String getArtifactDownloadUrl(Artifact artifact)
-    {
-        // We actually need to use repoSystem to re-resolve the remote
-        // repository for the artifact.
-        ArtifactRepository repo = artifact.getRepository();
-        return "";
-    }
+    @Parameter(defaultValue="${project.remotePluginRepositories}", readonly=true)
+    private List<RemoteRepository> repos;
+
+    @Component
+    private RepositoryLayoutProvider layoutProvider;
 
     static private Set<Artifact> artifacts = new HashSet<Artifact>();
+
+    private String getArtifactDownloadUrl(Artifact artifact)
+        throws MojoExecutionException
+    {
+        String coords = String.format("%s:%s:%s", artifact.getGroupId(), artifact.getArtifactId(), artifact.getVersion());
+
+        // Convert between the new API and aether's
+        DefaultArtifact defaultArtifact = new DefaultArtifact(coords);
+
+        ArtifactDescriptorRequest req = new ArtifactDescriptorRequest();
+        req.setArtifact(defaultArtifact);
+        req.setRepositories(repos);
+
+        ArtifactDescriptorResult result;
+
+        try {
+            result = repoSystem.readArtifactDescriptor(session.getRepositorySession(), req);
+        } catch (ArtifactDescriptorException e) {
+            throw new MojoExecutionException("Getting descriptor for " + artifact.toString(), e);
+        }
+
+        String baseURL = "";
+        ArtifactRepository ar = result.getRepository();
+        URI fileLoc;
+
+        try {
+            fileLoc = new URI("");
+        } catch (URISyntaxException e) {
+            throw new MojoExecutionException("Building empty URI", e);
+        }
+
+        if (ar instanceof RemoteRepository) {
+            RemoteRepository repo = (RemoteRepository) ar;
+            baseURL = repo.getUrl();
+
+            RepositoryLayout layout;
+
+            try {
+                layout = layoutProvider.newRepositoryLayout(session.getRepositorySession(), repo);
+            } catch (NoRepositoryLayoutException e) {
+                throw new MojoExecutionException("Getting repository layout", e);
+            }
+
+            fileLoc = layout.getLocation(defaultArtifact, false);
+        } else {
+            getLog().warn("repo: " + ar.getClass().getName());
+        }
+
+        return String.format("%s/%s", baseURL, fileLoc);
+    }
 
     @Override
     public void execute()
         throws MojoExecutionException
     {
-
         // Collect all artifacts from this project.
         for (Artifact artifact: project.getArtifacts()) {
             // If the artifact is remote, or cached from a remote, then
