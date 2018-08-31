@@ -79,7 +79,7 @@ import org.eclipse.aether.transfer.NoTransporterException;
        requiresOnline = true,
        requiresProject = true
      )
-@Execute ( phase = LifecyclePhase.INSTALL )
+@Execute ( phase = LifecyclePhase.TEST_COMPILE )
 public class Mvn2NixMojo extends AbstractMojo
 {
     @Parameter(defaultValue="${session}", required=true)
