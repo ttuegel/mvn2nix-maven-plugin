@@ -156,19 +156,14 @@ public class Mvn2NixMojo extends AbstractMojo
 
             info.url = String.format("%s/%s", baseURL, fileLoc);
 
-            List<RepositoryLayout.Checksum> checksums = layout.getChecksums(defaultArtifact, false, fileLoc);
-            GetTask task = null;
+            RepositoryLayout.Checksum sha1 = layout
+                .getChecksums(defaultArtifact, false, fileLoc).stream()
+                .filter(ck -> ck.getAlgorithm().equals("SHA-1"))
+                .findFirst()
+                .orElseThrow(() -> new MojoExecutionException("No SHA-1 for " + artifact.toString()));
 
-            for (RepositoryLayout.Checksum ck : checksums) {
-                if (ck.getAlgorithm().equals("SHA-1")) {
-                    task = new GetTask(ck.getLocation());
-                    break;
-                }
-            }
+            GetTask task = new GetTask(sha1.getLocation());
 
-            if (task == null) {
-                throw new MojoExecutionException("No SHA-1 for " + artifact.toString(), e);
-            }
 
             try {
                 Transporter transporter = transporterProvider.newTransporter(repoSession, repo);
