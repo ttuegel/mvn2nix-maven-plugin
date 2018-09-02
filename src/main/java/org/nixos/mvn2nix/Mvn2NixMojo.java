@@ -229,7 +229,24 @@ public class Mvn2NixMojo extends AbstractMojo
 
     private static String getCoordinates(Artifact artifact)
     {
-        return String.format("%s:%s:%s:%s", artifact.getGroupId(), artifact.getArtifactId(), artifact.getArtifactHandler().getExtension(), artifact.getVersion());
+        String coords;
+
+        if (artifact.hasClassifier()) {
+            coords = String.format("%s:%s:%s:%s:%s",
+                        artifact.getGroupId(),
+                        artifact.getArtifactId(),
+                        artifact.getArtifactHandler().getExtension(),
+                        artifact.getClassifier(),
+                        artifact.getVersion());
+        } else {
+            coords = String.format("%s:%s:%s:%s",
+                        artifact.getGroupId(),
+                        artifact.getArtifactId(),
+                        artifact.getArtifactHandler().getExtension(),
+                        artifact.getVersion());
+        }
+
+        return coords;
     }
 
     private class ArtifactDownloadInfo
