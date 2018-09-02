@@ -198,8 +198,7 @@ public class Mvn2NixMojo extends AbstractMojo
 
         if (project == projects.get(projects.size() - 1)) {
             // This is the last project, so we should write the manifest.
-            try {
-                FileOutputStream output = new FileOutputStream(outputFile);
+            try (FileOutputStream output = new FileOutputStream(outputFile)) {
                 JsonGenerator generator = Json.createGenerator(output);
                 generator.writeStartArray();
                 for (Artifact artifact: artifacts) {
@@ -218,7 +217,6 @@ public class Mvn2NixMojo extends AbstractMojo
                 }
                 generator.writeEnd();
                 generator.close();
-                output.close();
             } catch (FileNotFoundException e) {
                 throw new MojoExecutionException("Writing " + outputFile, e);
             } catch (IOException e) {
