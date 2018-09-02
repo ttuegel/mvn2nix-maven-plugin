@@ -114,10 +114,8 @@ public class Mvn2NixMojo extends AbstractMojo
         ArtifactDownloadInfo info = new ArtifactDownloadInfo();
         RepositorySystemSession repoSession = session.getRepositorySession();
 
-        String coords = String.format("%s:%s:%s", artifact.getGroupId(), artifact.getArtifactId(), artifact.getVersion());
-
         // Convert between the new API and aether's
-        DefaultArtifact defaultArtifact = new DefaultArtifact(coords);
+        DefaultArtifact defaultArtifact = new DefaultArtifact(getCoordinates(artifact));
 
         ArtifactDescriptorRequest req = new ArtifactDescriptorRequest();
         req.setArtifact(defaultArtifact);
@@ -206,13 +204,7 @@ public class Mvn2NixMojo extends AbstractMojo
                 generator.writeStartArray();
                 for (Artifact artifact: artifacts) {
                     getLog()
-                        .info("artifact "
-                              + artifact.getGroupId()
-                              + ":"
-                              + artifact.getArtifactId()
-                              + ":"
-                              + artifact.getVersion()
-                            );
+                        .info("artifact " + getCoordinates(artifact));
                     ArtifactDownloadInfo info = getArtifactDownloadInfo(artifact);
 
                     generator
@@ -233,6 +225,11 @@ public class Mvn2NixMojo extends AbstractMojo
                 throw new MojoExecutionException("Writing " + outputFile, e);
             }
         }
+    }
+
+    private static String getCoordinates(Artifact artifact)
+    {
+        return String.format("%s:%s:%s:%s", artifact.getGroupId(), artifact.getArtifactId(), artifact.getArtifactHandler().getExtension(), artifact.getVersion());
     }
 
     private class ArtifactDownloadInfo
