@@ -30,9 +30,11 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.HashSet;
+import java.util.Collections;
 import java.util.List;
-import java.util.Set;
+import java.util.Optional;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 import javax.json.Json;
 import javax.json.stream.JsonGenerator;
@@ -97,90 +99,121 @@ public class Mvn2NixMojo extends AbstractMojo
     @Component
     private RepositorySystem repoSystem;
 
-    @Parameter(defaultValue="${project.remotePluginRepositories}", readonly=true)
-    private List<RemoteRepository> repos;
-
     @Component
     private RepositoryLayoutProvider layoutProvider;
 
     @Component
     private TransporterProvider transporterProvider;
 
-    static private Set<Artifact> artifacts = new HashSet<Artifact>();
+    static private SortedSet<NixArtifact> artifacts =
+				Collections.synchronizedSortedSet(new TreeSet<NixArtifact>());
 
-    private ArtifactDownloadInfo getArtifactDownloadInfo(Artifact artifact)
+    private Optional<NixArtifact>
+    resolveNixArtifact(
+        Artifact artifact,
+        List<RemoteRepository> repos
+    )
         throws MojoExecutionException
     {
-        ArtifactDownloadInfo info = new ArtifactDownloadInfo();
         RepositorySystemSession repoSession = session.getRepositorySession();
+        DefaultArtifact defaultArtifact = toDefaultArtifact(artifact);
 
-        // Convert between the new API and aether's
-        DefaultArtifact defaultArtifact = new DefaultArtifact(getCoordinates(artifact));
-
-        ArtifactDescriptorRequest req = new ArtifactDescriptorRequest();
-        req.setArtifact(defaultArtifact);
-        req.setRepositories(repos);
+        ArtifactDescriptorRequest request = new ArtifactDescriptorRequest();
+        request.setArtifact(defaultArtifact);
+        request.setRepositories(repos);
 
         ArtifactDescriptorResult result;
-
         try {
-            result = repoSystem.readArtifactDescriptor(repoSession, req);
+            result = repoSystem.readArtifactDescriptor(repoSession, request);
         } catch (ArtifactDescriptorException e) {
-            throw new MojoExecutionException("Getting descriptor for " + artifact.toString(), e);
+            throw new MojoExecutionException(
+                "Getting descriptor for " + artifact.toString(),
+                e
+            );
         }
 
-        URI fileLoc;
-
-        try {
-            fileLoc = new URI("");
-        } catch (URISyntaxException e) {
-            throw new MojoExecutionException("Building empty URI", e);
-        }
-
-        ArtifactRepository ar = result.getRepository();
-
-        if (ar instanceof RemoteRepository) {
-            RemoteRepository repo = (RemoteRepository) ar;
-            String baseURL = repo.getUrl();
+        ArtifactRepository artifactRepo = result.getRepository();
+        if (artifactRepo instanceof RemoteRepository) {
+            RemoteRepository remoteRepo = (RemoteRepository) artifactRepo;
 
             RepositoryLayout layout;
             try {
-                layout = layoutProvider.newRepositoryLayout(repoSession, repo);
+                layout =
+                    layoutProvider.newRepositoryLayout(
+                        repoSession,
+                        remoteRepo
+                    );
             } catch (NoRepositoryLayoutException e) {
                 throw new MojoExecutionException("Getting repository layout", e);
             }
 
-            fileLoc = layout.getLocation(defaultArtifact, false);
+            URI remoteLocation = layout.getLocation(defaultArtifact, false);
 
-            info.url = String.format("%s/%s", baseURL, fileLoc);
+            String url =
+                String.format(
+                    "%s/%s",
+                    remoteRepo.getUrl(),
+                    remoteLocation
+                );
 
-            RepositoryLayout.Checksum sha1 = layout
-                .getChecksums(defaultArtifact, false, fileLoc).stream()
+            URI checksumLocation =
+                layout
+                .getChecksums(defaultArtifact, false, remoteLocation)
+                .stream()
                 .filter(ck -> ck.getAlgorithm().equals("SHA-1"))
                 .findFirst()
-                .orElseThrow(() -> new MojoExecutionException("No SHA-1 for " + artifact.toString()));
+                .orElseThrow(
+                    () ->
+                    new MojoExecutionException(
+                        "No SHA-1 for " + artifact.toString()
+                    )
+                )
+                .getLocation();
 
-            GetTask task = new GetTask(sha1.getLocation());
-
-
+            GetTask task = new GetTask(checksumLocation);
             try {
-                Transporter transporter = transporterProvider.newTransporter(repoSession, repo);
+                Transporter transporter =
+                    transporterProvider
+                    .newTransporter(repoSession, remoteRepo);
                 transporter.get(task);
             } catch (NoTransporterException e) {
-                throw new MojoExecutionException("No transporter for " + artifact.toString(), e);
+                throw new MojoExecutionException(
+                    "No transporter for " + artifact.toString(),
+                    e
+                );
             } catch (Exception e) {
-                throw new MojoExecutionException("Downloading SHA-1 for " + artifact.toString(), e);
+                throw new MojoExecutionException(
+                    "Downloading SHA-1 for " + artifact.toString(),
+                    e
+                );
             }
 
+            String hash;
             try {
-                info.hash = new String(task.getDataBytes(), 0, 40, "UTF-8");
+                hash = new String(task.getDataBytes(), 0, 40, "UTF-8");
             } catch (UnsupportedEncodingException e) {
-                throw new MojoExecutionException("Your JVM doesn't support UTF-8, fix that", e);
+                throw new MojoExecutionException(
+                    "Your JVM doesn't support UTF-8, fix that",
+                    e
+                );
             }
+
+            return Optional.of(new NixArtifact(defaultArtifact, url, hash));
+        } else {
+            return Optional.empty();
         }
+    }
 
-
-        return info;
+    private DefaultArtifact
+    toDefaultArtifact(Artifact artifact)
+    {
+        return new DefaultArtifact(
+            artifact.getGroupId(),
+            artifact.getArtifactId(),
+            artifact.getClassifier(),
+            artifact.getArtifactHandler().getExtension(),
+            artifact.getVersion()
+        );
     }
 
     @Override
@@ -189,11 +222,23 @@ public class Mvn2NixMojo extends AbstractMojo
     {
         // Collect all artifacts from this project.
         for (Artifact artifact: project.getArtifacts()) {
-            artifacts.add(artifact);
+            resolveNixArtifact(
+                artifact,
+                project.getRemoteProjectRepositories()
+						)
+            .ifPresent(
+                a -> artifacts.add(a)
+            );
         }
         // Collect all plugin artifacts from this project.
         for (Artifact artifact: project.getPluginArtifacts()) {
-            artifacts.add(artifact);
+            resolveNixArtifact(
+								artifact,
+						    project.getRemotePluginRepositories()
+						)
+            .ifPresent(
+                a -> artifacts.add(a)
+            );
         }
 
         if (project == projects.get(projects.size() - 1)) {
@@ -201,19 +246,8 @@ public class Mvn2NixMojo extends AbstractMojo
             try (FileOutputStream output = new FileOutputStream(outputFile)) {
                 JsonGenerator generator = Json.createGenerator(output);
                 generator.writeStartArray();
-                for (Artifact artifact: artifacts) {
-                    getLog()
-                        .info("artifact " + getCoordinates(artifact));
-                    ArtifactDownloadInfo info = getArtifactDownloadInfo(artifact);
-
-                    generator
-                        .writeStartObject()
-                        .write("groupId", artifact.getGroupId())
-                        .write("artifactId", artifact.getArtifactId())
-                        .write("version", artifact.getVersion())
-                        .write("url", info.url)
-                        .write("sha1", info.hash)
-                        .writeEnd();
+                for (NixArtifact artifact: artifacts) {
+                    artifact.write(generator);
                 }
                 generator.writeEnd();
                 generator.close();
@@ -247,14 +281,88 @@ public class Mvn2NixMojo extends AbstractMojo
         return coords;
     }
 
-    private class ArtifactDownloadInfo
-    {
-        public String url;
-        public String hash;
+    private final class NixArtifact
+				implements Comparable<NixArtifact> {
+        String groupId;
+        String artifactId;
+        String extension;
+        Optional<String> classifier;
+        String version;
+        String url;
+        String sha1;
 
-        public ArtifactDownloadInfo() {
-            url = "";
-            hash = "";
+        public
+        NixArtifact(
+            DefaultArtifact artifact,
+            String url_,
+            String sha1_
+        ) {
+            groupId = artifact.getGroupId();
+            artifactId = artifact.getArtifactId();
+            extension = artifact.getExtension();
+            if (artifact.getClassifier().length() > 0) {
+                classifier = Optional.of(artifact.getClassifier());
+            } else {
+                classifier = Optional.empty();
+            }
+            version = artifact.getVersion();
+            url = url_;
+            sha1 = sha1_;
         }
+
+				public int
+				compareTo(NixArtifact other) {
+						if (!groupId.equals(other.groupId))
+								return groupId.compareTo(other.groupId);
+						if (!artifactId.equals(other.artifactId))
+								return artifactId.compareTo(other.artifactId);
+						if (!version.equals(other.version))
+								return version.compareTo(other.version);
+						if (!extension.equals(other.extension))
+								return extension.compareTo(other.extension);
+						if (!classifier.equals(other.classifier))
+								return
+										classifier.map(
+												c1 -> other.classifier.map(
+														c2 -> c1.compareTo(c2)
+												).orElse(1)
+										).orElse(-1);
+						if (!url.equals(other.url))
+								return url.compareTo(other.url);
+						if (!sha1.equals(other.sha1))
+								return sha1.compareTo(other.sha1);
+						return 0;
+				}
+
+        public void
+        write(JsonGenerator generator) {
+            generator.writeStartObject();
+
+            generator.write("groupId", groupId)
+                .write("artifactId", artifactId)
+                .write("extension", extension)
+                .write("version", version)
+                .write("url", url)
+                .write("sha1", sha1);
+
+            classifier.ifPresent(
+                c -> generator.write("classifier", c)
+            );
+
+            generator.writeEnd();
+        }
+
+				public Boolean
+				equals(NixArtifact other) {
+						Boolean result = true;
+						result &= groupId.equals(other.groupId);
+						result &= artifactId.equals(other.artifactId);
+						result &= extension.equals(other.extension);
+						result &= version.equals(other.version);
+						result &= url.equals(other.url);
+						result &= sha1.equals(other.sha1);
+						result &= classifier.equals(other.classifier);
+						return result;
+				}
     }
 }
