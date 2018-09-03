@@ -256,6 +256,14 @@ public class Mvn2NixMojo extends AbstractMojo
     public void execute()
         throws MojoExecutionException
     {
+				// Collect parent artifact.
+				resolveManifestEntryForArtifact(
+						project.getParentArtifact(),
+						project.getRemoteProjectRepositories()
+				).ifPresent(
+						a -> artifacts.add(a)
+				);
+
         // Collect all artifacts from this project.
         for (Artifact artifact: project.getArtifacts()) {
             resolveManifestEntryForArtifact(
@@ -266,6 +274,7 @@ public class Mvn2NixMojo extends AbstractMojo
                 a -> artifacts.add(a)
             );
         }
+
         // Collect all plugin artifacts from this project.
         for (Artifact artifact: project.getPluginArtifacts()) {
             resolveManifestEntryForArtifact(
