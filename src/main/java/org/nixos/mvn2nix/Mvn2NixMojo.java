@@ -105,11 +105,11 @@ public class Mvn2NixMojo extends AbstractMojo
     @Component
     private TransporterProvider transporterProvider;
 
-    static private SortedSet<NixArtifact> artifacts =
-				Collections.synchronizedSortedSet(new TreeSet<NixArtifact>());
+    static private SortedSet<ManifestEntry> artifacts =
+				Collections.synchronizedSortedSet(new TreeSet<ManifestEntry>());
 
-    private Optional<NixArtifact>
-    resolveNixArtifact(
+    private Optional<ManifestEntry>
+    resolveManifestEntryForArtifact(
         Artifact artifact,
         List<RemoteRepository> repos
     )
@@ -170,11 +170,31 @@ public class Mvn2NixMojo extends AbstractMojo
 								);
 						}
 
-            return Optional.of(new NixArtifact(defaultArtifact, url, sha1));
-        } else {
+						String path = getPathForLocalArtifact(defaultArtifact);
+
+            return Optional.of(new ManifestEntry(path, url, sha1));
+        } else if (artifactRepo instanceof WorkspaceRepository) {
+						// The artifact is part of the current workspace,
+            // so there is nothing to do.
+						return Optional.empty();
+				} else {
+						getLog().warn(
+								"No repository for " + artifact.toString()
+						);
             return Optional.empty();
         }
     }
+
+		public String
+		getPathForLocalArtifact(
+				DefaultArtifact artifact
+		) {
+				return
+						session
+						.getRepositorySession()
+						.getLocalRepositoryManager()
+						.getPathForLocalArtifact(artifact);
+		}
 
 		public String
 		getChecksum(
@@ -238,7 +258,7 @@ public class Mvn2NixMojo extends AbstractMojo
     {
         // Collect all artifacts from this project.
         for (Artifact artifact: project.getArtifacts()) {
-            resolveNixArtifact(
+            resolveManifestEntryForArtifact(
                 artifact,
                 project.getRemoteProjectRepositories()
 						)
@@ -248,7 +268,7 @@ public class Mvn2NixMojo extends AbstractMojo
         }
         // Collect all plugin artifacts from this project.
         for (Artifact artifact: project.getPluginArtifacts()) {
-            resolveNixArtifact(
+            resolveManifestEntryForArtifact(
 								artifact,
 						    project.getRemotePluginRepositories()
 						)
@@ -262,7 +282,7 @@ public class Mvn2NixMojo extends AbstractMojo
             try (FileOutputStream output = new FileOutputStream(outputFile)) {
                 JsonGenerator generator = Json.createGenerator(output);
                 generator.writeStartArray();
-                for (NixArtifact artifact: artifacts) {
+                for (ManifestEntry artifact: artifacts) {
                     artifact.write(generator);
                 }
                 generator.writeEnd();
@@ -275,74 +295,41 @@ public class Mvn2NixMojo extends AbstractMojo
         }
     }
 
-    private static String getCoordinates(Artifact artifact)
-    {
-        String coords;
+		/**
+		 * An entry for the manifest.
+		 */
+    private final class ManifestEntry
+				implements Comparable<ManifestEntry> {
+				/**
+				 * The path of the artifact in the local repository.
+				 */
+        String path;
 
-        if (artifact.hasClassifier()) {
-            coords = String.format("%s:%s:%s:%s:%s",
-                        artifact.getGroupId(),
-                        artifact.getArtifactId(),
-                        artifact.getArtifactHandler().getExtension(),
-                        artifact.getClassifier(),
-                        artifact.getVersion());
-        } else {
-            coords = String.format("%s:%s:%s:%s",
-                        artifact.getGroupId(),
-                        artifact.getArtifactId(),
-                        artifact.getArtifactHandler().getExtension(),
-                        artifact.getVersion());
-        }
-
-        return coords;
-    }
-
-    private final class NixArtifact
-				implements Comparable<NixArtifact> {
-        String groupId;
-        String artifactId;
-        String extension;
-        Optional<String> classifier;
-        String version;
+				/**
+				 * The URL of the remote artifact.
+				 */
         String url;
+
+				/**
+				 * The SHA-1 checksum of the remote artifact.
+				 */
         String sha1;
 
         public
-        NixArtifact(
-            DefaultArtifact artifact,
+        ManifestEntry(
+						String path_,
             String url_,
             String sha1_
         ) {
-            groupId = artifact.getGroupId();
-            artifactId = artifact.getArtifactId();
-            extension = artifact.getExtension();
-            if (artifact.getClassifier().length() > 0) {
-                classifier = Optional.of(artifact.getClassifier());
-            } else {
-                classifier = Optional.empty();
-            }
-            version = artifact.getVersion();
+						path = path_;
             url = url_;
             sha1 = sha1_;
         }
 
 				public int
-				compareTo(NixArtifact other) {
-						if (!groupId.equals(other.groupId))
-								return groupId.compareTo(other.groupId);
-						if (!artifactId.equals(other.artifactId))
-								return artifactId.compareTo(other.artifactId);
-						if (!version.equals(other.version))
-								return version.compareTo(other.version);
-						if (!extension.equals(other.extension))
-								return extension.compareTo(other.extension);
-						if (!classifier.equals(other.classifier))
-								return
-										classifier.map(
-												c1 -> other.classifier.map(
-														c2 -> c1.compareTo(c2)
-												).orElse(1)
-										).orElse(-1);
+				compareTo(ManifestEntry other) {
+						if (!path.equals(other.path))
+								return path.compareTo(other.path);
 						if (!url.equals(other.url))
 								return url.compareTo(other.url);
 						if (!sha1.equals(other.sha1))
@@ -350,35 +337,26 @@ public class Mvn2NixMojo extends AbstractMojo
 						return 0;
 				}
 
-        public void
-        write(JsonGenerator generator) {
-            generator.writeStartObject();
-
-            generator.write("groupId", groupId)
-                .write("artifactId", artifactId)
-                .write("extension", extension)
-                .write("version", version)
-                .write("url", url)
-                .write("sha1", sha1);
-
-            classifier.ifPresent(
-                c -> generator.write("classifier", c)
-            );
-
-            generator.writeEnd();
-        }
-
 				public Boolean
-				equals(NixArtifact other) {
+				equals(ManifestEntry other) {
 						Boolean result = true;
-						result &= groupId.equals(other.groupId);
-						result &= artifactId.equals(other.artifactId);
-						result &= extension.equals(other.extension);
-						result &= version.equals(other.version);
-						result &= url.equals(other.url);
+						result &= path.equals(other.path);
 						result &= sha1.equals(other.sha1);
-						result &= classifier.equals(other.classifier);
+						result &= url.equals(other.url);
 						return result;
 				}
+
+				/**
+				 * Record this artifact in the JSON manifest.
+				 */
+        public void
+        write(JsonGenerator generator) {
+            generator
+								.writeStartObject()
+								.write("path", path)
+                .write("url", url)
+                .write("sha1", sha1)
+								.writeEnd();
+        }
     }
 }
