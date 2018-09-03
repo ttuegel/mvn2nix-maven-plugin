@@ -149,60 +149,76 @@ public class Mvn2NixMojo extends AbstractMojo
 
             URI remoteLocation = layout.getLocation(defaultArtifact, false);
 
-            String url =
-                String.format(
-                    "%s/%s",
-                    remoteRepo.getUrl(),
-                    remoteLocation
-                );
+						String url =
+								String.format(
+										"%s/%s",
+										remoteRepo.getUrl(),
+										remoteLocation
+								);
 
-            URI checksumLocation =
-                layout
-                .getChecksums(defaultArtifact, false, remoteLocation)
-                .stream()
-                .filter(ck -> ck.getAlgorithm().equals("SHA-1"))
-                .findFirst()
-                .orElseThrow(
-                    () ->
-                    new MojoExecutionException(
-                        "No SHA-1 for " + artifact.toString()
-                    )
-                )
-                .getLocation();
+						String sha1;
+						try {
+								Transporter transporter =
+										transporterProvider
+										.newTransporter(repoSession, remoteRepo);
 
-            GetTask task = new GetTask(checksumLocation);
-            try {
-                Transporter transporter =
-                    transporterProvider
-                    .newTransporter(repoSession, remoteRepo);
-                transporter.get(task);
-            } catch (NoTransporterException e) {
-                throw new MojoExecutionException(
-                    "No transporter for " + artifact.toString(),
-                    e
-                );
-            } catch (Exception e) {
-                throw new MojoExecutionException(
-                    "Downloading SHA-1 for " + artifact.toString(),
-                    e
-                );
-            }
+								sha1 = getChecksum(defaultArtifact, layout, transporter);
+						} catch (NoTransporterException e) {
+								throw new MojoExecutionException(
+										"No transporter for " + artifact.toString(),
+										e
+								);
+						}
 
-            String hash;
-            try {
-                hash = new String(task.getDataBytes(), 0, 40, "UTF-8");
-            } catch (UnsupportedEncodingException e) {
-                throw new MojoExecutionException(
-                    "Your JVM doesn't support UTF-8, fix that",
-                    e
-                );
-            }
-
-            return Optional.of(new NixArtifact(defaultArtifact, url, hash));
+            return Optional.of(new NixArtifact(defaultArtifact, url, sha1));
         } else {
             return Optional.empty();
         }
     }
+
+		public String
+		getChecksum(
+				DefaultArtifact artifact,
+				RepositoryLayout layout,
+				Transporter transporter
+		)
+				throws MojoExecutionException {
+				URI checksumLocation =
+						layout
+						.getChecksums(artifact, false, layout.getLocation(artifact, false))
+						.stream()
+						.filter(ck -> ck.getAlgorithm().equals("SHA-1"))
+						.findFirst()
+						.orElseThrow(
+								() ->
+								new MojoExecutionException(
+										"No SHA-1 for " + artifact.toString()
+								)
+						)
+						.getLocation();
+
+				GetTask task = new GetTask(checksumLocation);
+				try {
+						transporter.get(task);
+				} catch (Exception e) {
+						throw new MojoExecutionException(
+								"Downloading SHA-1 for " + artifact.toString(),
+								e
+						);
+				}
+
+				String sha1;
+				try {
+						sha1 = new String(task.getDataBytes(), 0, 40, "UTF-8");
+				} catch (UnsupportedEncodingException e) {
+						throw new MojoExecutionException(
+								"Your JVM doesn't support UTF-8, fix that",
+								e
+						);
+				}
+
+				return sha1;
+		}
 
     private DefaultArtifact
     toDefaultArtifact(Artifact artifact)
