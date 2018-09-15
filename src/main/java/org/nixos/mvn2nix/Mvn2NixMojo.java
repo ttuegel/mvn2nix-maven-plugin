@@ -23,25 +23,22 @@
 
 package org.nixos.mvn2nix;
 
-import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 import javax.json.Json;
 import javax.json.stream.JsonGenerator;
 
-import org.apache.maven.artifact.Artifact;
 import org.apache.maven.execution.MavenSession;
-import org.apache.maven.model.Plugin;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugins.annotations.Component;
@@ -51,16 +48,23 @@ import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.plugins.annotations.ResolutionScope;
 import org.apache.maven.project.MavenProject;
-
-import org.eclipse.aether.RepositorySystemSession;
 import org.eclipse.aether.RepositorySystem;
+import org.eclipse.aether.RepositorySystemSession;
+import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
+import org.eclipse.aether.collection.CollectRequest;
+import org.eclipse.aether.graph.Dependency;
+import org.eclipse.aether.graph.Exclusion;
 import org.eclipse.aether.repository.ArtifactRepository;
 import org.eclipse.aether.repository.RemoteRepository;
 import org.eclipse.aether.repository.WorkspaceRepository;
 import org.eclipse.aether.resolution.ArtifactDescriptorException;
 import org.eclipse.aether.resolution.ArtifactDescriptorRequest;
 import org.eclipse.aether.resolution.ArtifactDescriptorResult;
+import org.eclipse.aether.resolution.ArtifactResult;
+import org.eclipse.aether.resolution.DependencyRequest;
+import org.eclipse.aether.resolution.DependencyResolutionException;
+import org.eclipse.aether.resolution.DependencyResult;
 import org.eclipse.aether.spi.connector.layout.RepositoryLayout;
 import org.eclipse.aether.spi.connector.layout.RepositoryLayoutProvider;
 import org.eclipse.aether.spi.connector.transport.GetTask;
@@ -109,17 +113,16 @@ public class Mvn2NixMojo extends AbstractMojo
 				Collections.synchronizedSortedSet(new TreeSet<ManifestEntry>());
 
     private Optional<ManifestEntry>
-    resolveManifestEntryForArtifact(
-        Artifact artifact,
+    resolveArtifact(
+        org.eclipse.aether.artifact.Artifact artifact,
         List<RemoteRepository> repos
     )
         throws MojoExecutionException
     {
         RepositorySystemSession repoSession = session.getRepositorySession();
-        DefaultArtifact defaultArtifact = toDefaultArtifact(artifact);
 
         ArtifactDescriptorRequest request = new ArtifactDescriptorRequest();
-        request.setArtifact(defaultArtifact);
+        request.setArtifact(artifact);
         request.setRepositories(repos);
 
         ArtifactDescriptorResult result;
@@ -147,7 +150,7 @@ public class Mvn2NixMojo extends AbstractMojo
                 throw new MojoExecutionException("Getting repository layout", e);
             }
 
-            URI remoteLocation = layout.getLocation(defaultArtifact, false);
+            URI remoteLocation = layout.getLocation(artifact, false);
 
 						String url =
 								String.format(
@@ -162,7 +165,7 @@ public class Mvn2NixMojo extends AbstractMojo
 										transporterProvider
 										.newTransporter(repoSession, remoteRepo);
 
-								sha1 = getChecksum(defaultArtifact, layout, transporter);
+								sha1 = getChecksum(artifact, layout, transporter);
 						} catch (NoTransporterException e) {
 								throw new MojoExecutionException(
 										"No transporter for " + artifact.toString(),
@@ -170,7 +173,7 @@ public class Mvn2NixMojo extends AbstractMojo
 								);
 						}
 
-						String path = getPathForLocalArtifact(defaultArtifact);
+						String path = getPathForLocalArtifact(artifact);
 
             return Optional.of(new ManifestEntry(path, url, sha1));
         } else if (artifactRepo instanceof WorkspaceRepository) {
@@ -187,7 +190,7 @@ public class Mvn2NixMojo extends AbstractMojo
 
 		public String
 		getPathForLocalArtifact(
-				DefaultArtifact artifact
+				Artifact artifact
 		) {
 				return
 						session
@@ -198,7 +201,7 @@ public class Mvn2NixMojo extends AbstractMojo
 
 		public String
 		getChecksum(
-				DefaultArtifact artifact,
+				Artifact artifact,
 				RepositoryLayout layout,
 				Transporter transporter
 		)
@@ -240,8 +243,8 @@ public class Mvn2NixMojo extends AbstractMojo
 				return sha1;
 		}
 
-    private DefaultArtifact
-    toDefaultArtifact(Artifact artifact)
+    private Artifact
+    ResolverArtifact(org.apache.maven.artifact.Artifact artifact)
     {
         return new DefaultArtifact(
             artifact.getGroupId(),
@@ -252,39 +255,90 @@ public class Mvn2NixMojo extends AbstractMojo
         );
     }
 
+		private Exclusion
+		ResolverExclusion(org.apache.maven.model.Exclusion exclusion)
+		{
+				return new Exclusion(
+						exclusion.getGroupId(),
+						exclusion.getArtifactId(),
+						null,
+						null
+				);
+		}
+
+		private Dependency
+		ResolverDependency(org.apache.maven.model.Dependency dependency)
+		{
+				return new Dependency(
+						new DefaultArtifact(
+								dependency.getGroupId(),
+								dependency.getArtifactId(),
+								dependency.getClassifier(),
+								dependency.getType(),
+								dependency.getVersion()
+						),
+						dependency.getScope(),
+						dependency.isOptional(),
+						dependency
+						.getExclusions()
+						.stream()
+						.map((ex) -> ResolverExclusion(ex))
+						.collect(Collectors.toList())
+				);
+		}
+
+		private void resolveDependency(
+				Dependency dependency,
+				List<RemoteRepository> repos
+		)
+        throws MojoExecutionException
+		{
+				DependencyRequest request = new DependencyRequest();
+				request.setCollectRequest(new CollectRequest(dependency, repos));
+
+				DependencyResult result;
+				try {
+						result =
+								repoSystem.resolveDependencies(
+										session.getRepositorySession(),
+										request
+								);
+				} catch (DependencyResolutionException e) {
+            throw new MojoExecutionException(
+                "Resolving dependencies for " + dependency.toString(),
+                e
+            );
+				}
+
+				for (ArtifactResult artifactResult : result.getArtifactResults()) {
+						resolveArtifact(artifactResult.getArtifact(), repos);
+				}
+		}
+
     @Override
     public void execute()
         throws MojoExecutionException
     {
-				// Collect parent artifact.
-				resolveManifestEntryForArtifact(
-						project.getParentArtifact(),
+				// Collect parent artifact
+				resolveArtifact(
+						ResolverArtifact(project.getParentArtifact()),
 						project.getRemoteProjectRepositories()
-				).ifPresent(
-						a -> artifacts.add(a)
 				);
 
-        // Collect all artifacts from this project.
-        for (Artifact artifact: project.getArtifacts()) {
-            resolveManifestEntryForArtifact(
-                artifact,
-                project.getRemoteProjectRepositories()
-						)
-            .ifPresent(
-                a -> artifacts.add(a)
-            );
-        }
+        // Collect dependency artifacts
+				for (org.apache.maven.model.Dependency dependency :
+								 project.getDependencies()) {
+						resolveDependency(
+								ResolverDependency(dependency),
+								project.getRemoteProjectRepositories()
+						);
+				}
 
-        // Collect all plugin artifacts from this project.
-        for (Artifact artifact: project.getPluginArtifacts()) {
-            resolveManifestEntryForArtifact(
-								artifact,
-						    project.getRemotePluginRepositories()
-						)
-            .ifPresent(
-                a -> artifacts.add(a)
-            );
-        }
+        // Collect plugin artifacts
+				// TODO
+
+        // Collect build extension artifacts
+				// TODO
 
         if (project == projects.get(projects.size() - 1)) {
             // This is the last project, so we should write the manifest.
