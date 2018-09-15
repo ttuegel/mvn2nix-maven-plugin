@@ -39,6 +39,7 @@ import javax.json.Json;
 import javax.json.stream.JsonGenerator;
 
 import org.apache.maven.execution.MavenSession;
+import org.apache.maven.model.Plugin;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugins.annotations.Component;
@@ -293,8 +294,11 @@ public class Mvn2NixMojo extends AbstractMojo
 		)
         throws MojoExecutionException
 		{
-				DependencyRequest request = new DependencyRequest();
-				request.setCollectRequest(new CollectRequest(dependency, repos));
+				DependencyRequest request =
+						new DependencyRequest(
+								new CollectRequest(dependency, repos),
+								null  // return all dependencies
+						);
 
 				DependencyResult result;
 				try {
@@ -312,6 +316,32 @@ public class Mvn2NixMojo extends AbstractMojo
 
 				for (ArtifactResult artifactResult : result.getArtifactResults()) {
 						resolveArtifact(artifactResult.getArtifact(), repos);
+				}
+		}
+
+		private void
+		resolvePlugin(
+				Plugin plugin,
+				List<RemoteRepository> repos
+		)
+        throws MojoExecutionException
+		{
+				resolveDependency(
+						new Dependency(
+								new DefaultArtifact(
+										plugin.getGroupId(),
+										plugin.getArtifactId(),
+										null,
+										plugin.getVersion()
+								),
+								"runtime"
+						),
+						repos
+				);
+
+				for (org.apache.maven.model.Dependency dependency :
+								 plugin.getDependencies()) {
+						resolveDependency(ResolverDependency(dependency), repos);
 				}
 		}
 
@@ -334,8 +364,23 @@ public class Mvn2NixMojo extends AbstractMojo
 						);
 				}
 
-        // Collect plugin artifacts
-				// TODO
+        // Collect project plugin artifacts
+				for (org.apache.maven.model.Plugin plugin :
+								 project.getPluginManagement().getPlugins()) {
+						resolvePlugin(
+								plugin,
+								project.getRemotePluginRepositories()
+						);
+				}
+
+        // Collect build plugin artifacts
+				for (org.apache.maven.model.Plugin plugin :
+								 project.getBuild().getPlugins()) {
+						resolvePlugin(
+								plugin,
+								project.getRemotePluginRepositories()
+						);
+				}
 
         // Collect build extension artifacts
 				// TODO
