@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
@@ -157,6 +158,17 @@ public class Mvn2NixMojo extends AbstractMojo
 								getLog().info(
 										"Resolved remote artifact " + artifact.toString()
 								);
+								try {
+										resolveDependency(
+												new Dependency(
+														PomArtifact(artifact).get(),
+														"compile",
+														new Boolean(false)
+												),
+												repos
+										);
+								} catch (NoSuchElementException e) {
+								}
 						} else {
 								getLog().info(
 										"Already resolved artifact " + artifact.toString()
@@ -182,6 +194,25 @@ public class Mvn2NixMojo extends AbstractMojo
             artifact.getVersion()
         );
     }
+
+    private Optional<Artifact>
+    PomArtifact(Artifact artifact)
+    {
+				if (artifact.getExtension().equals("pom")) {
+						// Provided artifact is already a POM
+						return Optional.empty();
+				} else {
+						return Optional.of(
+								new DefaultArtifact(
+										artifact.getGroupId(),
+										artifact.getArtifactId(),
+										artifact.getClassifier(),
+										"pom",
+										artifact.getVersion()
+								)
+						);
+				}
+		}
 
 		private Exclusion
 		ResolverExclusion(org.apache.maven.model.Exclusion exclusion)
@@ -247,49 +278,6 @@ public class Mvn2NixMojo extends AbstractMojo
 								"Resolving dependencies for " + dependency.toString()
 								+ ": " + e.toString()
 						);
-						return;
-				}
-
-				Artifact artifact = dependency.getArtifact();
-				if (!artifact.getExtension().equals("pom")) {
-						getLog().info(
-								"Resolving POM for " + artifact.toString()
-						);
-						// Also try to resolve the POM for this dependency.
-						Artifact pomArtifact =
-								new DefaultArtifact(
-										artifact.getGroupId(),
-										artifact.getArtifactId(),
-										artifact.getClassifier(),
-										"pom",
-										artifact.getVersion()
-								);
-						Dependency pomDependency =
-								new Dependency(
-										pomArtifact,
-										dependency.getScope(),
-										dependency.isOptional(),
-										dependency.getExclusions()
-								);
-						try {
-								DependencyResult result =
-										repoSystem.resolveDependencies(
-												session.getRepositorySession(),
-												new DependencyRequest(
-														new CollectRequest(pomDependency, repos),
-														null  // return all dependencies
-												)
-										);
-								for (ArtifactResult artifactResult : result.getArtifactResults()) {
-										resolveArtifact(artifactResult.getArtifact(), repos);
-								}
-						} catch (DependencyResolutionException e) {
-								getLog().warn(
-										"Resolving dependencies for " + dependency.toString()
-										+ ": " + e.toString()
-								);
-								return;
-						}
 				}
 		}
 
