@@ -228,6 +228,9 @@ public class Mvn2NixMojo extends AbstractMojo
 		)
         throws MojoExecutionException
 		{
+				getLog().info(
+						"Resolving " + dependency.toString() + "..."
+				);
 				try {
 						DependencyResult result =
 								repoSystem.resolveDependencies(
@@ -246,6 +249,9 @@ public class Mvn2NixMojo extends AbstractMojo
 								+ ": " + e.toString()
 						);
 				}
+				getLog().info(
+						"Resolved " + dependency.toString() + "."
+				);
 		}
 
 		private void
