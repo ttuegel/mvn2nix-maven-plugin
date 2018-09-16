@@ -140,7 +140,7 @@ public class Mvn2NixMojo extends AbstractMojo
 										resolveDependency(
 												new Dependency(
 														PomArtifact(artifact).get(),
-														"compile",
+														"runtime",
 														new Boolean(false)
 												),
 												Arrays.asList(remoteRepository)
@@ -269,7 +269,7 @@ public class Mvn2NixMojo extends AbstractMojo
 										"jar",
 										plugin.getVersion()
 								),
-								"compile"
+								"runtime"
 						),
 						repos
 				);
