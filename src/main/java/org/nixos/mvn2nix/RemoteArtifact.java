@@ -145,16 +145,27 @@ public class RemoteArtifact implements Comparable<RemoteArtifact> {
 						);
 				}
 
+				String checksum = task.getDataString().trim();
 				String sha1;
 				try {
-						sha1 = new String(task.getDataBytes(), 0, 40, "UTF-8");
-				} catch (UnsupportedEncodingException e) {
-						throw new MojoExecutionException(
-								"Your JVM doesn't support UTF-8, fix that",
-								e
-						);
+						sha1 = checksum.substring(0, 40);
+						if (sha1.matches("\\p{XDigit}{40}")) {
+								// Well-behaved checksums have the SHA1 in the first 40 bytes.
+								// Truly well-behaved files contain *only* the SHA1.
+								return sha1;
+						}
+
+						sha1 = checksum.substring(checksum.length() - 40);
+						if (sha1.matches("\\p{XDigit}{40}")) {
+								// Some older checksum files appear to have leading junk.
+								// Use the last 40 characters of the SHA1.
+								return sha1;
+						}
+				} catch (IndexOutOfBoundsException e) {
 				}
 
-				return sha1;
+				throw new MojoExecutionException(
+						"Invalid SHA1: " + checksum
+				);
 		}
 }
