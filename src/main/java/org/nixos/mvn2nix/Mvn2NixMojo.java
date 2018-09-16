@@ -252,15 +252,6 @@ public class Mvn2NixMojo extends AbstractMojo
 		)
         throws MojoExecutionException
 		{
-				Boolean isRemote =
-						resolveArtifact(
-								dependency.getArtifact(),
-								repos
-						);
-
-				if (!isRemote)
-						return;
-
 				try {
 						DependencyResult result =
 								repoSystem.resolveDependencies(
