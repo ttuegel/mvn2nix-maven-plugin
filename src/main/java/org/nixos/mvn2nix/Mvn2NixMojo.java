@@ -29,6 +29,7 @@ import org.nixos.mvn2nix.RemoteArtifact;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -79,8 +80,6 @@ import org.eclipse.aether.spi.connector.transport.TransporterProvider;
  * @author Thomas Tuegel
  */
 @Mojo( name = "mvn2nix",
-       executionStrategy = "once-per-session",
-       requiresDependencyResolution = ResolutionScope.TEST,
        requiresOnline = true,
        requiresProject = true
      )
@@ -113,48 +112,27 @@ public class Mvn2NixMojo extends AbstractMojo
 						new TreeSet<RemoteArtifact>()
 				);
 
-    private Boolean
-    resolveArtifact(
-        org.eclipse.aether.artifact.Artifact artifact,
-        List<RemoteRepository> repos
-    )
+    private void
+    resolveArtifactResult(ArtifactResult result)
         throws MojoExecutionException
     {
+				Artifact artifact = result.getArtifact();
+
 				// Don't use isSnapshot() here, which also returns true for resolved
 				// snapshot versions.
 				if (artifact.getVersion().endsWith("-SNAPSHOT")) {
 						getLog().warn(
-								"Ignoring snapshot " + artifact.toString()
+								"Ignoring unresolved snapshot " + artifact.toString()
 						);
-						return false;
-				}
-
-				// Read the artifact descriptor to determine the correct remote
-				// repository. The correct remote repository may be "none" for local
-				// artifacts! We must not use a resolution request, as this will always
-				// return a remote result, even for reactor artifacts.
-				ArtifactDescriptorResult result;
-        try {
-						result =
-								repoSystem.readArtifactDescriptor(
-										session.getRepositorySession(),
-										new ArtifactDescriptorRequest(artifact, repos, null)
-								);
-				} catch (ArtifactDescriptorException e) {
-            throw new MojoExecutionException(
-                "Getting artifact descriptor for " + artifact.toString(),
-                e
-            );
+						return;
 				}
 
 				ArtifactRepository repo = result.getRepository();
 				if (result.getRepository() instanceof RemoteRepository) {
-						RemoteArtifact remote =
-								new RemoteArtifact(
-										artifact,
-										(RemoteRepository) repo
-								);
-						if (artifacts.add(remote)) {
+						RemoteRepository remoteRepository = (RemoteRepository) repo;
+						RemoteArtifact remoteArtifact =
+								new RemoteArtifact(artifact, remoteRepository);
+						if (artifacts.add(remoteArtifact)) {
 								getLog().info(
 										"Resolved remote artifact " + artifact.toString()
 								);
@@ -165,7 +143,7 @@ public class Mvn2NixMojo extends AbstractMojo
 														"compile",
 														new Boolean(false)
 												),
-												repos
+												Arrays.asList(remoteRepository)
 										);
 								} catch (NoSuchElementException e) {
 								}
@@ -174,12 +152,10 @@ public class Mvn2NixMojo extends AbstractMojo
 										"Already resolved artifact " + artifact.toString()
 								);
 						}
-						return true;
 				} else {
 						getLog().info(
 								"Ignoring local artifact " + artifact.toString()
 						);
-						return false;
 				}
 		}
 
@@ -262,7 +238,7 @@ public class Mvn2NixMojo extends AbstractMojo
 										)
 								);
 						for (ArtifactResult artifactResult : result.getArtifactResults()) {
-								resolveArtifact(artifactResult.getArtifact(), repos);
+								resolveArtifactResult(artifactResult);
 						}
 				} catch (DependencyResolutionException e) {
 						getLog().warn(
@@ -324,8 +300,11 @@ public class Mvn2NixMojo extends AbstractMojo
         throws MojoExecutionException
     {
 				// Collect parent artifact
-				resolveArtifact(
-						ResolverArtifact(project.getParentArtifact()),
+				resolveDependency(
+						new Dependency(
+								ResolverArtifact(project.getParentArtifact()),
+								"compile"
+						),
 						project.getRemoteProjectRepositories()
 				);
 
